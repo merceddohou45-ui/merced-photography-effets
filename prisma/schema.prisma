@@ -45,6 +45,7 @@ model MediaFile {
   thumbnail  String?
   enhancedUrl String?
   metadata   Json?
+  status     String   @default("processing")
   createdAt  DateTime @default(now())
 }
 

@@ -30,9 +30,7 @@ function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
 }
 
-// import optional enhancer
-let enhancer: any = null
-try { enhancer = require('../../lib/ai/image-enhance') } catch (e) { enhancer = null }
+import { enqueueMediaJob } from '../../lib/queue'
 
 export default async function handler(req: any, res: any) {
   const session = await getServerSession(req, res, authOptions)
@@ -78,10 +76,9 @@ export default async function handler(req: any, res: any) {
     const projectId = projectIdHeader || null
     const baseKey = `uploads/${user.id}/${projectId || 'general'}/${timestamp}_${fileId}_${safeName}`
 
-    // handle images via temp-file -> optional enhance -> thumbnail -> upload original+thumbnail
+    // images: write to temp file and upload original, then enqueue processing jobs
     if (mimetype.startsWith('image/')) {
       const tmpPath = tempFilePath('img')
-      const tmpThumb = tempFilePath('thumb')
 
       const p = (async () => {
         try {
@@ -89,72 +86,40 @@ export default async function handler(req: any, res: any) {
           const writeStream = fs.createWriteStream(tmpPath)
           await pipeline(file as any, writeStream)
 
-          // Optional enhancement step
-          let enhancedPath: string | null = null
-          if (enhanceFlag && enhancer && enhancer.enhanceImage) {
-            enhancedPath = tempFilePath('enh')
-            await enhancer.enhanceImage(tmpPath, enhancedPath, { upscale: false })
-          }
-
-          const uploadSourcePath = enhancedPath || tmpPath
-
-          // generate thumbnail using sharp
-          try {
-            const sharp = require('sharp')
-            await sharp(uploadSourcePath).resize({ width: 320 }).toFile(tmpThumb)
-          } catch (e) {
-            // if thumbnail generation fails, continue without thumbnail
-            console.warn('Thumbnail generation failed', e)
-          }
-
-          // upload original
-          await uploadFileFromPath(uploadSourcePath, baseKey, mimetype)
+          // upload original from temp path
+          await uploadFileFromPath(tmpPath, baseKey, mimetype)
           createdObjects.push(baseKey)
 
-          // upload thumbnail if exists
-          let thumbKey: string | null = null
-          if (fs.existsSync(tmpThumb)) {
-            thumbKey = `thumbnails/${baseKey}`
-            await uploadFileFromPath(tmpThumb, thumbKey, 'image/png')
-            createdObjects.push(thumbKey)
-          }
-
-          // if enhancement created a separate enhanced file, upload that too (store enhancedUrl)
-          let enhancedKey: string | null = null
-          if (enhancedPath) {
-            enhancedKey = `enhanced/${baseKey}`
-            await uploadFileFromPath(enhancedPath, enhancedKey, mimetype)
-            createdObjects.push(enhancedKey)
-          }
-
-          // create DB record
+          // create DB record with processing status and metadata indicating enhancement preference
           const media = await prisma.mediaFile.create({ data: {
             projectId: projectId,
             filename: filename,
             mimeType: mimetype,
-            size: fs.statSync(uploadSourcePath).size,
+            size: fs.statSync(tmpPath).size,
             url: baseKey,
-            thumbnail: thumbKey,
-            enhancedUrl: enhancedKey,
-            metadata: {}
+            thumbnail: null,
+            enhancedUrl: null,
+            metadata: { enhance: !!enhanceFlag },
+            status: 'processing'
           }})
 
-          // generate signed URLs for preview
-          const signedUrl = await getSignedReadUrl(baseKey, 60 * 60)
-          const signedThumb = thumbKey ? await getSignedReadUrl(thumbKey, 60 * 60) : null
-          const signedEnhanced = enhancedKey ? await getSignedReadUrl(enhancedKey, 60 * 60) : null
-
-          // cleanup temp files
-          try { fs.unlinkSync(tmpPath) } catch (e) { /* ignore */ }
-          try { if (tmpThumb) fs.unlinkSync(tmpThumb) } catch (e) { /* ignore */ }
-          try { if (enhancedPath) fs.unlinkSync(enhancedPath) } catch (e) { /* ignore */ }
-
           createdRecords.push(media)
-          return { filename, mimeType: mimetype, size: media.size, key: baseKey, signedUrl, signedThumb, signedEnhanced, media }
+
+          // enqueue thumbnail job
+          await enqueueMediaJob({ type: 'generate_thumbnail', mediaId: media.id, key: baseKey, mimeType: mimetype })
+
+          // enqueue enhancement job if requested
+          if (enhanceFlag) {
+            await enqueueMediaJob({ type: 'enhance_image', mediaId: media.id, key: baseKey, mimeType: mimetype })
+          }
+
+          // cleanup temp file
+          try { fs.unlinkSync(tmpPath) } catch (e) {}
+
+          const signedUrl = await getSignedReadUrl(baseKey, 60 * 60)
+          return { filename, mimeType: mimetype, key: baseKey, signedUrl, media }
         } catch (err: any) {
-          // cleanup temp files
           try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath) } catch (e) {}
-          try { if (fs.existsSync(tmpThumb)) fs.unlinkSync(tmpThumb) } catch (e) {}
           throw err
         }
       })()
@@ -168,7 +133,6 @@ export default async function handler(req: any, res: any) {
       try {
         await uploadStreamToR2(file as any, baseKey, mimetype)
         createdObjects.push(baseKey)
-        const signedUrl = await getSignedReadUrl(baseKey, 60 * 60)
         const media = await prisma.mediaFile.create({ data: {
           projectId: projectId,
           filename: filename,
@@ -177,9 +141,14 @@ export default async function handler(req: any, res: any) {
           url: baseKey,
           thumbnail: null,
           enhancedUrl: null,
-          metadata: {}
+          metadata: { enhance: false },
+          status: 'processing'
         }})
-        // size unknown because streamed; consider updating size via headObject in future
+
+        // enqueue placeholder video processing job
+        await enqueueMediaJob({ type: 'process_video_thumbnail', mediaId: media.id, key: baseKey, mimeType: mimetype })
+
+        const signedUrl = await getSignedReadUrl(baseKey, 60 * 60)
         return { filename, mimeType: mimetype, key: baseKey, signedUrl, media }
       } catch (err) {
         throw err
