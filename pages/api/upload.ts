@@ -50,10 +50,25 @@ export default async function handler(req: any, res: any) {
   let aborted = false
   const filePromises: Promise<any>[] = []
   let enhanceFlag = false
+  // watermark form fields (defaults)
+  let watermarkEnabled = false
+  let watermarkText: string | null = null
+  let watermarkPosition: string | null = null
+  let watermarkOpacity: number | null = null
+  let watermarkSize: string | null = null
+
   const projectIdHeader = req.headers['x-project-id'] as string | undefined
 
   busboy.on('field', (fieldname, val) => {
     if (fieldname === 'enhance' && (val === '1' || val === 'true')) enhanceFlag = true
+    if (fieldname === 'watermarkEnabled' && (val === '1' || val === 'true')) watermarkEnabled = true
+    if (fieldname === 'watermarkText') watermarkText = String(val)
+    if (fieldname === 'watermarkPosition') watermarkPosition = String(val)
+    if (fieldname === 'watermarkOpacity') {
+      const n = Number(val)
+      if (!Number.isNaN(n)) watermarkOpacity = n
+    }
+    if (fieldname === 'watermarkSize') watermarkSize = String(val)
   })
 
   busboy.on('file', (fieldname: string, file: NodeJS.ReadableStream, filename: string, encoding: string, mimetype: string) => {
@@ -100,6 +115,11 @@ export default async function handler(req: any, res: any) {
             thumbnail: null,
             enhancedUrl: null,
             metadata: { enhance: !!enhanceFlag },
+            watermarkText: watermarkText,
+            watermarkPosition: watermarkPosition,
+            watermarkOpacity: watermarkOpacity,
+            watermarkEnabled: watermarkEnabled,
+            watermarkApplied: false,
             status: 'processing'
           }})
 
@@ -111,6 +131,11 @@ export default async function handler(req: any, res: any) {
           // enqueue enhancement job if requested
           if (enhanceFlag) {
             await enqueueMediaJob({ type: 'enhance_image', mediaId: media.id, key: baseKey, mimeType: mimetype })
+          }
+
+          // enqueue watermark immediately if requested and enhancement not desired
+          if (watermarkEnabled && !enhanceFlag) {
+            await enqueueMediaJob({ type: 'apply_watermark', mediaId: media.id, key: baseKey, mimeType: mimetype })
           }
 
           // cleanup temp file
@@ -142,6 +167,12 @@ export default async function handler(req: any, res: any) {
           thumbnail: null,
           enhancedUrl: null,
           metadata: { enhance: false },
+          // persist watermark preferences for reference though we don't apply to videos yet
+          watermarkText: watermarkText,
+          watermarkPosition: watermarkPosition,
+          watermarkOpacity: watermarkOpacity,
+          watermarkEnabled: watermarkEnabled,
+          watermarkApplied: false,
           status: 'processing'
         }})
 
