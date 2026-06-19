@@ -1,4 +1,5 @@
 import UploadDropzone from '../../components/UploadDropzone'
+import AdminJobsPanel from '../../components/AdminJobsPanel'
 import React, { useEffect, useState } from 'react'
 
 export default function DashboardPage() {
@@ -10,19 +11,16 @@ export default function DashboardPage() {
   const [watermarkSize, setWatermarkSize] = useState('medium')
 
   const handleComplete = (files: any[]) => {
-    // files may be nested; flatten
     const newFiles = files.flatMap((f: any)=> f.files ? f.files : [f])
     setUploaded(prev => [...newFiles, ...prev])
   }
 
   useEffect(()=>{
-    // Optionally fetch recent media files for user
     async function load(){
       try{
         const res = await fetch('/api/projects')
         if (res.ok) {
           const json = await res.json()
-          // not directly media files -- placeholder
         }
       }catch(e){/* ignore */}
     }
@@ -36,6 +34,8 @@ export default function DashboardPage() {
     opacity: watermarkOpacity,
     size: watermarkSize
   }
+
+  const showAdmin = typeof process !== 'undefined' && process.env && (process.env.NEXT_PUBLIC_ENABLE_ADMIN_UI === 'true')
 
   return (
     <section className="container mx-auto px-6 py-12">
@@ -82,7 +82,7 @@ export default function DashboardPage() {
       </div>
 
       <h2 className="text-2xl font-semibold mb-4">Recently uploaded</h2>
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid md:grid-cols-3 gap-4 mb-8">
         {uploaded.length === 0 && <div className="text-sm text-gray-600">No uploads yet.</div>}
         {uploaded.map((u, idx) => (
           <div key={idx} className="border p-3 rounded">
@@ -103,6 +103,14 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {showAdmin && (
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold mb-4">Admin</h2>
+          <AdminJobsPanel />
+        </div>
+      )}
+
     </section>
   )
 }
