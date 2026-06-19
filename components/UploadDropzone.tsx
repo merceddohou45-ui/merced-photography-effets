@@ -10,7 +10,7 @@ type UploadFile = {
   response?: any
 }
 
-export default function UploadDropzone({ projectId, onComplete }: { projectId?: string, onComplete?: (files: any[]) => void }){
+export default function UploadDropzone({ projectId, onComplete, watermark }: { projectId?: string, onComplete?: (files: any[]) => void, watermark?: any }){
   const [files, setFiles] = useState<UploadFile[]>([])
   const [enhance, setEnhance] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -57,6 +57,15 @@ export default function UploadDropzone({ projectId, onComplete }: { projectId?: 
       form.append('file', uf.file)
       if (projectId) xhr.setRequestHeader('X-Project-Id', projectId)
       if (enhance && uf.file.type.startsWith('image/')) form.append('enhance', 'true')
+
+      // append watermark fields if provided
+      if (watermark) {
+        form.append('watermarkEnabled', watermark.enabled ? 'true' : 'false')
+        if (watermark.text) form.append('watermarkText', watermark.text)
+        if (watermark.position) form.append('watermarkPosition', watermark.position)
+        if (typeof watermark.opacity !== 'undefined') form.append('watermarkOpacity', String(watermark.opacity))
+        if (watermark.size) form.append('watermarkSize', watermark.size)
+      }
 
       xhr.upload.onprogress = function(e) {
         if (e.lengthComputable) {

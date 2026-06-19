@@ -35,18 +35,23 @@ model Project {
 }
 
 model MediaFile {
-  id         String   @id @default(cuid())
-  project    Project  @relation(fields: [projectId], references: [id])
-  projectId  String
-  filename   String
-  mimeType   String
-  size       Int
-  url        String
-  thumbnail  String?
-  enhancedUrl String?
-  metadata   Json?
-  status     String   @default("processing")
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  project      Project  @relation(fields: [projectId], references: [id])
+  projectId    String
+  filename     String
+  mimeType     String
+  size         Int
+  url          String
+  thumbnail    String?
+  enhancedUrl  String?
+  metadata     Json?
+  status       String   @default("processing")
+  watermarkText     String?
+  watermarkPosition String? @default("bottom-right")
+  watermarkOpacity  Float?  @default(1.0)
+  watermarkEnabled  Boolean? @default(false)
+  watermarkApplied  Boolean? @default(false)
+  createdAt    DateTime @default(now())
 }
 
 model MusicTrack {

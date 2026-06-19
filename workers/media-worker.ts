@@ -40,7 +40,10 @@ async function processGenerateThumbnail(jobData: any) {
     const enhanceRequested = meta['enhance'] || false
     const refreshed = await prisma.mediaFile.findUnique({ where: { id: mediaId } })
     if (!enhanceRequested || refreshed?.enhancedUrl) {
-      await prisma.mediaFile.update({ where: { id: mediaId }, data: { status: 'completed' } })
+      // If watermark not enabled, mark completed. If watermark enabled, leave for watermark job to complete.
+      if (!refreshed?.watermarkEnabled) {
+        await prisma.mediaFile.update({ where: { id: mediaId }, data: { status: 'completed' } })
+      }
     }
 
     console.log('[worker] thumbnail generated for', mediaId)
@@ -76,10 +79,16 @@ async function processEnhanceImage(jobData: any) {
     await uploadFileFromPath(tmpEnhanced, enhancedKey, media.mimeType)
     await prisma.mediaFile.update({ where: { id: mediaId }, data: { enhancedUrl: enhancedKey } })
 
-    // Check completion
+    // Check completion or enqueue watermark
     const refreshed = await prisma.mediaFile.findUnique({ where: { id: mediaId } })
-    if (refreshed?.thumbnail || !(refreshed?.metadata as any)?.enhance) {
-      await prisma.mediaFile.update({ where: { id: mediaId }, data: { status: 'completed' } })
+    if (refreshed?.watermarkEnabled) {
+      // enqueue watermark job — ensure queue import only here to avoid circular deps
+      const { enqueueMediaJob } = await import('../lib/queue')
+      await enqueueMediaJob({ type: 'apply_watermark', mediaId, key: enhancedKey, mimeType: media.mimeType })
+    } else {
+      if (refreshed?.thumbnail || !(refreshed?.metadata as any)?.enhance) {
+        await prisma.mediaFile.update({ where: { id: mediaId }, data: { status: 'completed' } })
+      }
     }
 
     console.log('[worker] enhanced image for', mediaId)
@@ -91,6 +100,95 @@ async function processEnhanceImage(jobData: any) {
     try { fs.unlinkSync(tmpPath) } catch (e) {}
     try { fs.unlinkSync(tmpEnhanced) } catch (e) {}
   }
+}
+
+async function processApplyWatermark(jobData: any) {
+  const { mediaId, key } = jobData
+  console.log('[worker] apply_watermark', mediaId, key)
+  const media = await prisma.mediaFile.findUnique({ where: { id: mediaId } })
+  if (!media) {
+    console.warn('[worker] media not found', mediaId)
+    return
+  }
+  if (!media.watermarkEnabled) {
+    console.log('[worker] watermark not enabled for', mediaId)
+    return
+  }
+  if (media.watermarkApplied) {
+    console.log('[worker] watermark already applied, skipping', media.watermarkApplied)
+    return
+  }
+
+  const sourceKey = media.enhancedUrl || media.url
+  const tmpSource = tempFilePath('src')
+  const tmpOut = tempFilePath('wm')
+  try {
+    await downloadToPath(sourceKey, tmpSource)
+
+    // create SVG overlay for text watermark
+    const text = media.watermarkText || ''
+    const opacity = media.watermarkOpacity ?? 1
+    const position = media.watermarkPosition || 'bottom-right'
+
+    const svg = `
+      <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <style>
+          .watermark { fill: rgba(255,255,255,${opacity}); font-size: 48px; font-family: Arial, Helvetica, sans-serif; }
+        </style>
+        <text x="50%" y="50%" text-anchor="middle" class="watermark">${escapeXml(text)}</text>
+      </svg>
+    `
+
+    // Use sharp to composite SVG over source. Positioning via gravity will be handled by compositing with appropriate top/left computed placement.
+    const src = sharp(tmpSource)
+    const metadata = await src.metadata()
+    // Render svg to buffer scaled relative to image size
+    const svgBuffer = Buffer.from(svg)
+
+    // Compute gravity mapping
+    const gravity = mapPositionToGravity(position)
+
+    await src.composite([{ input: svgBuffer, gravity: gravity, blend: 'over' }]).toFile(tmpOut)
+
+    const finalKey = `final/${media.url}`
+    await uploadFileFromPath(tmpOut, finalKey, media.mimeType)
+
+    await prisma.mediaFile.update({ where: { id: mediaId }, data: { watermarkApplied: true, watermarkText: media.watermarkText, watermarkPosition: media.watermarkPosition, watermarkOpacity: media.watermarkOpacity, status: 'completed' } })
+
+    console.log('[worker] watermark applied for', mediaId)
+  } catch (e) {
+    console.error('[worker] apply_watermark error', e)
+    await prisma.mediaFile.update({ where: { id: mediaId }, data: { status: 'failed' } }).catch(()=>null)
+    throw e
+  } finally {
+    try { fs.unlinkSync(tmpSource) } catch (e) {}
+    try { fs.unlinkSync(tmpOut) } catch (e) {}
+  }
+}
+
+function mapPositionToGravity(position: string) {
+  switch (position) {
+    case 'top-left': return 'northwest'
+    case 'top-right': return 'northeast'
+    case 'bottom-left': return 'southwest'
+    case 'bottom-right': return 'southeast'
+    case 'center': return 'center'
+    default: return 'southeast'
+  }
+}
+
+function escapeXml(unsafe: string) {
+  return unsafe.replace(/[<>&'"\n]/g, function (c) {
+    switch (c) {
+      case '<': return '&lt;'
+      case '>': return '&gt;'
+      case '&': return '&amp;'
+      case '\'': return '&#39;'
+      case '"': return '&quot;'
+      case '\n': return '&#10;'
+      default: return ''
+    }
+  })
 }
 
 async function processVideoThumbnail(jobData: any) {
@@ -114,6 +212,9 @@ export async function startWorker() {
               break
             case 'enhance_image':
               await processEnhanceImage(job.data)
+              break
+            case 'apply_watermark':
+              await processApplyWatermark(job.data)
               break
             case 'process_video_thumbnail':
               await processVideoThumbnail(job.data)
@@ -146,6 +247,9 @@ export async function startWorker() {
           break
         case 'enhance_image':
           await processEnhanceImage(job)
+          break
+        case 'apply_watermark':
+          await processApplyWatermark(job)
           break
         case 'process_video_thumbnail':
           await processVideoThumbnail(job)
