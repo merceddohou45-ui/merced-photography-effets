@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  --color-primary: #000000;
+  --color-accent: #D4AF37;
+  --color-bg: #FFFFFF;
+}
+
+body{
+  background-color: var(--color-bg);
+}
+
+.container{
+  max-width: 1100px;
+}

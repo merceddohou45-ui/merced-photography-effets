@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  hashedPassword String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  projects      Project[]
+  subscriptions Subscription[]
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  user        User        @relation(fields: [userId], references: [id])
+  userId      String
+  title       String
+  description String?
+  status      String      @default("draft")
+  mediaFiles  MediaFile[]
+  musicTracks MusicTrack[]
+  exports     Export[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model MediaFile {
+  id         String   @id @default(cuid())
+  project    Project  @relation(fields: [projectId], references: [id])
+  projectId  String
+  filename   String
+  mimeType   String
+  size       Int
+  url        String
+  thumbnail  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+}
+
+model MusicTrack {
+  id         String   @id @default(cuid())
+  project    Project  @relation(fields: [projectId], references: [id])
+  projectId  String
+  filename   String
+  mimeType   String
+  size       Int
+  url        String
+  bpm        Int?
+  duration   Int?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+}
+
+model Watermark {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  type      String
+  text      String?
+  imageUrl  String?
+  position  String   @default("bottom-right")
+  size      Int?     
+  opacity   Float?   
+  createdAt DateTime @default(now())
+}
+
+model Export {
+  id         String   @id @default(cuid())
+  project    Project  @relation(fields: [projectId], references: [id])
+  projectId  String
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  status     String   @default("queued")
+  quality    String   @default("1080p")
+  url        String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  plan      String
+  active    Boolean  @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+}
