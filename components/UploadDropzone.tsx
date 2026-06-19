@@ -12,6 +12,7 @@ type UploadFile = {
 
 export default function UploadDropzone({ projectId, onComplete }: { projectId?: string, onComplete?: (files: any[]) => void }){
   const [files, setFiles] = useState<UploadFile[]>([])
+  const [enhance, setEnhance] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const onFilesSelected = useCallback((selected: FileList | null) => {
@@ -55,6 +56,7 @@ export default function UploadDropzone({ projectId, onComplete }: { projectId?: 
       const form = new FormData()
       form.append('file', uf.file)
       if (projectId) xhr.setRequestHeader('X-Project-Id', projectId)
+      if (enhance && uf.file.type.startsWith('image/')) form.append('enhance', 'true')
 
       xhr.upload.onprogress = function(e) {
         if (e.lengthComputable) {
@@ -115,10 +117,14 @@ export default function UploadDropzone({ projectId, onComplete }: { projectId?: 
     <div>
       <div onDrop={onDrop} onDragOver={(e)=>e.preventDefault()} className="border-dashed border-2 border-gray-300 p-6 rounded">
         <p className="mb-2">Drag & drop up to 30 photos or videos here (max 200MB each)</p>
-        <div className="flex gap-2 justify-center">
+        <div className="flex gap-2 justify-center mb-3">
           <button onClick={openFileDialog} className="px-4 py-2 bg-black text-white rounded">Select files</button>
-          <input ref={inputRef} type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e)=>onFilesSelected(e.target.files)} />
+          <label className="ml-4 flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={enhance} onChange={(e)=>setEnhance(e.target.checked)} />
+            Enhance image quality (AI)
+          </label>
         </div>
+        <input ref={inputRef} type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e)=>onFilesSelected(e.target.files)} />
       </div>
 
       <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -43,6 +43,7 @@ model MediaFile {
   size       Int
   url        String
   thumbnail  String?
+  enhancedUrl String?
   metadata   Json?
   createdAt  DateTime @default(now())
 }

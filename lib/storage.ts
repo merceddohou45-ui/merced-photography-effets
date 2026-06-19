@@ -1,6 +1,7 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { PassThrough } from 'stream'
+import fs from 'fs'
 
 const R2_BUCKET = process.env.R2_BUCKET || ''
 const R2_ENDPOINT = process.env.R2_ENDPOINT || process.env.STORAGE_ENDPOINT || ''
@@ -29,7 +30,18 @@ export async function uploadStreamToR2(stream: NodeJS.ReadableStream, key: strin
     ContentType: contentType
   })
   await s3Client.send(command)
-  // return object key. Signed URL generated separately.
+  return { key }
+}
+
+export async function uploadFileFromPath(filePath: string, key: string, contentType = 'application/octet-stream') {
+  const stream = fs.createReadStream(filePath)
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    Body: stream,
+    ContentType: contentType
+  })
+  await s3Client.send(command)
   return { key }
 }
 
