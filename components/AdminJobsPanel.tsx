@@ -16,15 +16,26 @@ export default function AdminJobsPanel() {
   const [mediaId, setMediaId] = useState('')
   const [media, setMedia] = useState<any | null>(null)
   const [fetchingMedia, setFetchingMedia] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(10)
+  const [statusFilter, setStatusFilter] = useState('failed')
+  const [query, setQuery] = useState('')
+  const [counts, setCounts] = useState({ processing: 0, completed: 0, failed: 0 })
 
   const fetchJobs = async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/admin/jobs/failed')
+      const params = new URLSearchParams()
+      params.set('page', String(page))
+      params.set('pageSize', String(pageSize))
+      if (statusFilter) params.set('status', statusFilter)
+      if (query) params.set('search', query)
+      const res = await fetch('/api/admin/jobs/failed?' + params.toString())
       if (!res.ok) throw new Error(await res.text())
       const json = await res.json()
       setJobs(json.jobs || [])
+      setCounts(json.counts || { processing: 0, completed: 0, failed: 0 })
     } catch (e: any) {
       setError(e.message || String(e))
     } finally {
@@ -32,7 +43,7 @@ export default function AdminJobsPanel() {
     }
   }
 
-  useEffect(()=>{ fetchJobs() }, [])
+  useEffect(()=>{ fetchJobs() }, [page, statusFilter, query])
 
   const retryJob = async (jobId: string) => {
     setRetrying(jobId)
@@ -62,13 +73,20 @@ export default function AdminJobsPanel() {
 
   return (
     <div className="p-4 border rounded bg-white shadow-sm">
-      <h3 className="text-lg font-semibold mb-3">Admin: Failed Jobs</h3>
+      <h3 className="text-lg font-semibold mb-3">Admin: Jobs</h3>
 
-      <div className="mb-4">
-        <button className="px-3 py-1 bg-black text-white rounded" onClick={fetchJobs} disabled={loading}>Refresh</button>
+      <div className="mb-4 flex items-center gap-3">
+        <button className={`px-3 py-1 rounded ${statusFilter==='failed' ? 'bg-black text-white' : 'bg-gray-100'}`} onClick={()=>{ setStatusFilter('failed'); setPage(1) }}>Failed ({counts.failed})</button>
+        <button className={`px-3 py-1 rounded ${statusFilter==='processing' ? 'bg-black text-white' : 'bg-gray-100'}`} onClick={()=>{ setStatusFilter('processing'); setPage(1) }}>Processing ({counts.processing})</button>
+        <button className={`px-3 py-1 rounded ${statusFilter==='completed' ? 'bg-black text-white' : 'bg-gray-100'}`} onClick={()=>{ setStatusFilter('completed'); setPage(1) }}>Completed ({counts.completed})</button>
+
+        <div className="ml-auto flex items-center gap-2">
+          <input className="border p-2" placeholder="search jobId/mediaId/type" value={query} onChange={(e)=>{ setQuery(e.target.value); setPage(1) }} />
+          <button className="px-3 py-1 bg-black text-white rounded" onClick={fetchJobs}>Search</button>
+        </div>
       </div>
 
-      {loading && <div className="text-sm text-gray-600">Loading failed jobs...</div>}
+      {loading && <div className="text-sm text-gray-600">Loading...</div>}
       {error && <div className="text-sm text-red-600">Error: {error}</div>}
 
       <div className="overflow-x-auto">
@@ -97,9 +115,15 @@ export default function AdminJobsPanel() {
                 </td>
               </tr>
             ))}
-            {jobs.length===0 && !loading && <tr><td className="p-4" colSpan={6}>No failed jobs</td></tr>}
+            {jobs.length===0 && !loading && <tr><td className="p-4" colSpan={6}>No jobs</td></tr>}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2">
+        <button className="px-3 py-1 bg-gray-100 rounded" onClick={()=>setPage(p => Math.max(1, p-1))}>Previous</button>
+        <div>Page {page}</div>
+        <button className="px-3 py-1 bg-gray-100 rounded" onClick={()=>setPage(p => p + 1)}>Next</button>
       </div>
 
       <div className="mt-6 border-t pt-4">
